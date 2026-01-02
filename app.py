@@ -12,7 +12,7 @@ from io import BytesIO
 st.set_page_config(page_title="Microstock Metadata Generator", layout="wide")
 
 # ===============================
-# API KEY CHECK (PENTING)
+# API KEY CHECK
 # ===============================
 if "OPENAI_API_KEY" not in st.secrets:
     st.error("❌ OPENAI_API_KEY belum diset di Streamlit Secrets")
@@ -29,7 +29,7 @@ def image_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buffer.getvalue()).decode()
 
 # ===============================
-# AI ANALYSIS (VISION)
+# AI ANALYSIS (VISION) – STABLE
 # ===============================
 def analyze_image_ai(img: Image.Image):
     image_base64 = image_to_base64(img)
@@ -58,7 +58,7 @@ Rules:
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",  # 🔥 MODEL AMAN UNTUK SDK LAMA
             messages=[
                 {"role": "system", "content": "You are an Adobe Stock metadata specialist."},
                 {
@@ -81,12 +81,12 @@ Rules:
         return json.loads(content)
 
     except openai.error.AuthenticationError:
-        st.error("❌ API key OpenAI tidak valid / billing belum aktif")
+        st.error("❌ API key OpenAI tidak valid atau billing belum aktif")
         st.stop()
 
     except Exception as e:
-        st.error("❌ Gagal menganalisis gambar dengan AI")
-        st.caption(str(e))
+        st.error("❌ OpenAI Vision Error")
+        st.code(str(e))
         return None
 
 # ===============================
@@ -125,6 +125,7 @@ def generate_metadata(data):
         "backdrop"
     ]
 
+    # clean & limit 50
     keywords = list(dict.fromkeys([k for k in keywords if k]))[:50]
 
     return title, description, keywords
