@@ -2,15 +2,20 @@ import streamlit as st
 import openai
 import json
 import pandas as pd
-from PIL import Image
 import numpy as np
-from collections import Counter
+from PIL import Image
 
 # ===============================
-# CONFIG
+# PAGE CONFIG
 # ===============================
-st.set_page_config(page_title="Microstock Metadata Generator", layout="wide")
+st.set_page_config(
+    page_title="Microstock Metadata Generator (STABLE)",
+    layout="wide"
+)
 
+# ===============================
+# OPENAI CONFIG
+# ===============================
 if "OPENAI_API_KEY" not in st.secrets:
     st.error("❌ OPENAI_API_KEY belum diset di Streamlit Secrets")
     st.stop()
@@ -18,50 +23,62 @@ if "OPENAI_API_KEY" not in st.secrets:
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # ===============================
-# COLOR DETECTION (LOCAL, STABLE)
+# ADVANCED COLOR DETECTION
 # ===============================
-COLOR_LABELS = {
-    "blue": [0, 0, 255],
-    "purple": [128, 0, 128],
-    "green": [0, 128, 0],
-    "red": [220, 20, 60],
-    "orange": [255, 165, 0],
-    "yellow": [255, 215, 0],
-    "black": [0, 0, 0],
-    "white": [255, 255, 255],
-    "gray": [128, 128, 128],
-    "pink": [255, 105, 180],
-    "teal": [0, 128, 128],
-    "cyan": [0, 255, 255],
-}
-
-def detect_main_color(img):
-    img = img.resize((80, 80))
+def detect_colors_advanced(img):
+    img = img.resize((120, 120))
     pixels = np.array(img).reshape(-1, 3)
 
-    def closest(rgb):
-        r, g, b = rgb
-        best, dist = "abstract", 1e9
-        for name, ref in COLOR_LABELS.items():
-            d = (r-ref[0])**2 + (g-ref[1])**2 + (b-ref[2])**2
-            if d < dist:
-                best, dist = name, d
-        return best
+    colors = {
+        "black": 0,
+        "white": 0,
+        "gray": 0,
+        "gold": 0,
+        "blue": 0,
+        "red": 0,
+        "green": 0,
+        "purple": 0
+    }
 
-    labels = [closest(p) for p in pixels]
-    return Counter(labels).most_common(1)[0][0]
+    for r, g, b in pixels:
+        brightness = (r + g + b) / 3
+
+        if brightness < 60:
+            colors["black"] += 1
+        elif brightness > 220:
+            colors["white"] += 1
+        elif r > 180 and g > 140 and b < 120:
+            colors["gold"] += 1
+        elif b > r and b > g:
+            colors["blue"] += 1
+        elif r > g and r > b:
+            colors["red"] += 1
+        elif g > r and g > b:
+            colors["green"] += 1
+        elif r > 120 and b > 120:
+            colors["purple"] += 1
+        else:
+            colors["gray"] += 1
+
+    sorted_colors = sorted(colors.items(), key=lambda x: x[1], reverse=True)
+    primary = sorted_colors[0][0]
+    secondary = sorted_colors[1][0]
+
+    return primary, secondary
 
 # ===============================
-# AI METADATA (TEXT ONLY – SAFE)
+# AI METADATA GENERATOR (SAFE)
 # ===============================
-def generate_metadata_ai(color):
+def generate_metadata_ai(color_text):
     prompt = f"""
 You are an Adobe Stock metadata expert.
 
-Main color: {color}
+Main colors: {color_text}
 
-Return ONLY valid JSON, no markdown, no explanation.
+Return ONLY valid JSON.
+No markdown. No explanation.
 
+Format:
 {{
   "title": "",
   "description": "",
@@ -69,33 +86,40 @@ Return ONLY valid JSON, no markdown, no explanation.
 }}
 
 Rules:
-- Keywords max 50
-- SEO friendly
+- Max 50 keywords
+- SEO optimized
+- Relevant to abstract background
 - No brand names
 """
 
     response = openai.ChatCompletion.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=300
+        max_tokens=350
     )
 
-    text = response.choices[0].message.content.strip()
+    content = response.choices[0].message.content.strip()
 
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
+        return json.loads(content)
+    except Exception:
         return {
-            "title": f"Abstract {color.capitalize()} Background",
-            "description": f"Abstract {color} background suitable for web, presentation and digital design.",
-            "keywords": [color, "abstract background", "design", "digital", "wallpaper"]
+            "title": f"Abstract {color_text.capitalize()} Background",
+            "description": f"Modern abstract background with {color_text} colors, suitable for digital design, website, presentation, and marketing.",
+            "keywords": color_text.split() + [
+                "abstract background",
+                "modern design",
+                "digital background",
+                "luxury",
+                "technology"
+            ]
         }
 
 # ===============================
 # UI
 # ===============================
 st.title("🚀 Microstock Metadata Generator (STABLE)")
-st.caption("No Vision • No eval • No crash • Streamlit-safe")
+st.caption("✔ Accurate color • ✔ No eval • ✔ No Vision • ✔ Adobe Stock ready")
 
 files = st.file_uploader(
     "Upload image(s)",
@@ -109,13 +133,15 @@ if files:
     for f in files:
         st.divider()
         img = Image.open(f).convert("RGB")
-        st.image(img, width=300)
+        st.image(img, width=320)
 
-        color = detect_main_color(img)
-        st.write("🎨 Detected color:", color)
+        primary, secondary = detect_colors_advanced(img)
+        color_text = f"{primary} and {secondary}"
 
-        with st.spinner("Generating metadata..."):
-            data = generate_metadata_ai(color)
+        st.write(f"🎨 Detected colors: **{primary}**, **{secondary}**")
+
+        with st.spinner("Generating metadata with AI..."):
+            data = generate_metadata_ai(color_text)
 
         st.subheader("Title")
         st.write(data["title"])
@@ -123,7 +149,7 @@ if files:
         st.subheader("Description")
         st.write(data["description"])
 
-        st.subheader("Keywords")
+        st.subheader("Keywords (50)")
         st.write(", ".join(data["keywords"][:50]))
 
         results.append({
@@ -138,14 +164,14 @@ if files:
 # ===============================
 if results:
     st.divider()
-    st.subheader("📦 Adobe Stock CSV")
+    st.subheader("📦 Adobe Stock CSV Export")
 
     df = pd.DataFrame(results)
     st.dataframe(df, use_container_width=True)
 
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "⬇️ Download CSV",
+        "⬇️ Download Adobe Stock CSV",
         csv,
         "adobe_stock_metadata.csv",
         "text/csv"
