@@ -13,21 +13,23 @@ st.set_page_config(page_title="Microstock Metadata Generator", layout="wide")
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # ===============================
-# FUNCTIONS
+# UTILS
 # ===============================
-
 def image_to_base64(img: Image.Image) -> str:
     buffer = BytesIO()
     img.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode()
 
+# ===============================
+# AI ANALYSIS (VISION)
+# ===============================
 def analyze_image_ai(img: Image.Image):
     image_base64 = image_to_base64(img)
 
     prompt = """
 You are a professional Adobe Stock metadata expert.
 
-Analyze the image and return ONLY valid JSON with this structure:
+Analyze the image and return ONLY valid JSON:
 
 {
   "main_color": "",
@@ -39,7 +41,7 @@ Analyze the image and return ONLY valid JSON with this structure:
 }
 
 Rules:
-- Colors must be common English colors (blue, purple, green, red, orange, yellow, black, white, gray, pink, teal, cyan)
+- Colors: simple English (blue, purple, green, red, orange, yellow, black, white, gray, pink, teal, cyan)
 - Shapes: wave, circle, curve, line, mesh, abstract
 - Style: gradient, minimal, modern, futuristic, digital, smooth
 - Best_use: website background, app background, presentation, branding, wallpaper
@@ -54,37 +56,48 @@ Rules:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {"type": "image_base64", "image_base64": image_base64}
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{image_base64}"
+                        }
+                    }
                 ]
             }
         ],
-        max_tokens=300
+        max_tokens=400
     )
 
-    return json.loads(response.choices[0].message.content)
+    content = response.choices[0].message.content
+    return json.loads(content)
 
+# ===============================
+# METADATA GENERATOR
+# ===============================
 def generate_metadata(data):
-    main_color = data["main_color"]
-    style = ", ".join(data["style"][:2])
-    shapes = ", ".join(data["shapes"][:2])
+    main_color = data.get("main_color", "abstract")
+    shapes = ", ".join(data.get("shapes", [])[:2])
+    style = ", ".join(data.get("style", [])[:2])
+    best_use = ", ".join(data.get("best_use", [])[:2])
 
     title = f"Abstract {main_color.capitalize()} Background with {shapes}"
+
     description = (
         f"High quality abstract {main_color} background featuring {shapes}. "
-        f"Modern {style} style suitable for {', '.join(data['best_use'][:2])}. "
-        "Perfect for digital design, web backgrounds, presentations and branding."
+        f"Modern {style} style suitable for {best_use}. "
+        "Perfect for website backgrounds, presentations, digital design and branding."
     )
 
     keywords = [
         main_color,
         "abstract background",
-        *data["secondary_colors"],
-        *data["shapes"],
-        *data["style"],
-        *data["mood"],
-        *data["best_use"],
-        "digital",
+        *data.get("secondary_colors", []),
+        *data.get("shapes", []),
+        *data.get("style", []),
+        *data.get("mood", []),
+        *data.get("best_use", []),
         "modern",
+        "digital",
         "design",
         "wallpaper",
         "technology",
@@ -94,15 +107,14 @@ def generate_metadata(data):
         "backdrop"
     ]
 
-    # Bersihkan & limit 50 keyword
-    keywords = list(dict.fromkeys(keywords))[:50]
+    # clean + max 50
+    keywords = list(dict.fromkeys([k for k in keywords if k]))[:50]
 
     return title, description, keywords
 
 # ===============================
 # UI
 # ===============================
-
 st.title("🚀 Microstock Metadata Generator (Adobe Stock)")
 st.caption("Upload image → AI generates title, description & 50 keywords")
 
@@ -142,17 +154,17 @@ if uploaded_files:
                 })
 
             except Exception as e:
-                st.error("AI analysis failed. Try again.")
+                st.error(str(e))
 
 # ===============================
 # CSV EXPORT
 # ===============================
 if results:
     st.divider()
-    df = pd.DataFrame(results)
-
     st.subheader("📦 Adobe Stock CSV Export")
-    st.dataframe(df)
+
+    df = pd.DataFrame(results)
+    st.dataframe(df, use_container_width=True)
 
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(
