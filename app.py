@@ -10,6 +10,14 @@ from io import BytesIO
 # CONFIG
 # ===============================
 st.set_page_config(page_title="Microstock Metadata Generator", layout="wide")
+
+# ===============================
+# API KEY CHECK (PENTING)
+# ===============================
+if "OPENAI_API_KEY" not in st.secrets:
+    st.error("❌ OPENAI_API_KEY belum diset di Streamlit Secrets")
+    st.stop()
+
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # ===============================
@@ -48,28 +56,38 @@ Rules:
 - NO explanation text
 """
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are an Adobe Stock metadata specialist."},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{image_base64}"
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are an Adobe Stock metadata specialist."},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{image_base64}"
+                            }
                         }
-                    }
-                ]
-            }
-        ],
-        max_tokens=400
-    )
+                    ]
+                }
+            ],
+            max_tokens=400
+        )
 
-    content = response.choices[0].message.content
-    return json.loads(content)
+        content = response.choices[0].message.content
+        return json.loads(content)
+
+    except openai.error.AuthenticationError:
+        st.error("❌ API key OpenAI tidak valid / billing belum aktif")
+        st.stop()
+
+    except Exception as e:
+        st.error("❌ Gagal menganalisis gambar dengan AI")
+        st.caption(str(e))
+        return None
 
 # ===============================
 # METADATA GENERATOR
@@ -107,7 +125,6 @@ def generate_metadata(data):
         "backdrop"
     ]
 
-    # clean + max 50
     keywords = list(dict.fromkeys([k for k in keywords if k]))[:50]
 
     return title, description, keywords
@@ -133,28 +150,28 @@ if uploaded_files:
         st.image(img, width=300)
 
         with st.spinner("Analyzing image with AI..."):
-            try:
-                analysis = analyze_image_ai(img)
-                title, desc, keywords = generate_metadata(analysis)
+            analysis = analyze_image_ai(img)
 
-                st.subheader("Title")
-                st.write(title)
+            if not analysis:
+                continue
 
-                st.subheader("Description")
-                st.write(desc)
+            title, desc, keywords = generate_metadata(analysis)
 
-                st.subheader("Keywords (50)")
-                st.write(", ".join(keywords))
+            st.subheader("Title")
+            st.write(title)
 
-                results.append({
-                    "Filename": file.name,
-                    "Title": title,
-                    "Description": desc,
-                    "Keywords": ", ".join(keywords)
-                })
+            st.subheader("Description")
+            st.write(desc)
 
-            except Exception as e:
-                st.error(str(e))
+            st.subheader("Keywords (50)")
+            st.write(", ".join(keywords))
+
+            results.append({
+                "Filename": file.name,
+                "Title": title,
+                "Description": desc,
+                "Keywords": ", ".join(keywords)
+            })
 
 # ===============================
 # CSV EXPORT
