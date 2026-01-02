@@ -1,142 +1,94 @@
 import streamlit as st
 import openai
-import base64
-import json
 import pandas as pd
 from PIL import Image
-from io import BytesIO
+import numpy as np
+from collections import Counter
 
 # ===============================
 # CONFIG
 # ===============================
 st.set_page_config(page_title="Microstock Metadata Generator", layout="wide")
 
-# ===============================
-# API KEY CHECK
-# ===============================
 if "OPENAI_API_KEY" not in st.secrets:
-    st.error("❌ OPENAI_API_KEY belum diset di Streamlit Secrets")
+    st.error("❌ OPENAI_API_KEY belum diset")
     st.stop()
 
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # ===============================
-# UTILS
+# COLOR DETECTION (LOCAL & AKURAT)
 # ===============================
-def image_to_base64(img: Image.Image) -> str:
-    buffer = BytesIO()
-    img.save(buffer, format="PNG")
-    return base64.b64encode(buffer.getvalue()).decode()
-
-# ===============================
-# AI ANALYSIS (VISION) – STABLE
-# ===============================
-def analyze_image_ai(img: Image.Image):
-    image_base64 = image_to_base64(img)
-
-    prompt = """
-You are a professional Adobe Stock metadata expert.
-
-Analyze the image and return ONLY valid JSON:
-
-{
-  "main_color": "",
-  "secondary_colors": [],
-  "shapes": [],
-  "style": [],
-  "mood": [],
-  "best_use": []
+COLOR_MAP = {
+    "blue": [(0, 0, 255), (70, 130, 180)],
+    "purple": [(128, 0, 128)],
+    "green": [(0, 128, 0)],
+    "red": [(220, 20, 60)],
+    "orange": [(255, 165, 0)],
+    "yellow": [(255, 215, 0)],
+    "black": [(0, 0, 0)],
+    "white": [(255, 255, 255)],
+    "gray": [(128, 128, 128)],
+    "pink": [(255, 105, 180)],
+    "teal": [(0, 128, 128)],
+    "cyan": [(0, 255, 255)],
 }
 
+def closest_color(rgb):
+    r, g, b = rgb
+    min_dist = 1e9
+    name = "abstract"
+    for color, samples in COLOR_MAP.items():
+        for s in samples:
+            dist = (r-s[0])**2 + (g-s[1])**2 + (b-s[2])**2
+            if dist < min_dist:
+                min_dist = dist
+                name = color
+    return name
+
+def detect_main_color(img):
+    img = img.resize((100, 100))
+    pixels = np.array(img).reshape(-1, 3)
+    colors = [closest_color(tuple(p)) for p in pixels]
+    return Counter(colors).most_common(1)[0][0]
+
+# ===============================
+# AI TEXT GENERATOR (STABLE)
+# ===============================
+def generate_metadata_ai(color):
+    prompt = f"""
+Create Adobe Stock metadata.
+
+Main color: {color}
+
+Return JSON only:
+{{
+ "title": "",
+ "description": "",
+ "keywords": []
+}}
+
 Rules:
-- Colors: simple English (blue, purple, green, red, orange, yellow, black, white, gray, pink, teal, cyan)
-- Shapes: wave, circle, curve, line, mesh, abstract
-- Style: gradient, minimal, modern, futuristic, digital, smooth
-- Best_use: website background, app background, presentation, branding, wallpaper
-- NO explanation text
+- Keywords max 50
+- No brand names
+- SEO friendly
 """
 
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4.1-mini",  # 🔥 MODEL AMAN UNTUK SDK LAMA
-            messages=[
-                {"role": "system", "content": "You are an Adobe Stock metadata specialist."},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{image_base64}"
-                            }
-                        }
-                    ]
-                }
-            ],
-            max_tokens=400
-        )
-
-        content = response.choices[0].message.content
-        return json.loads(content)
-
-    except openai.error.AuthenticationError:
-        st.error("❌ API key OpenAI tidak valid atau billing belum aktif")
-        st.stop()
-
-    except Exception as e:
-        st.error("❌ OpenAI Vision Error")
-        st.code(str(e))
-        return None
-
-# ===============================
-# METADATA GENERATOR
-# ===============================
-def generate_metadata(data):
-    main_color = data.get("main_color", "abstract")
-    shapes = ", ".join(data.get("shapes", [])[:2])
-    style = ", ".join(data.get("style", [])[:2])
-    best_use = ", ".join(data.get("best_use", [])[:2])
-
-    title = f"Abstract {main_color.capitalize()} Background with {shapes}"
-
-    description = (
-        f"High quality abstract {main_color} background featuring {shapes}. "
-        f"Modern {style} style suitable for {best_use}. "
-        "Perfect for website backgrounds, presentations, digital design and branding."
+    response = openai.ChatCompletion.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=300
     )
 
-    keywords = [
-        main_color,
-        "abstract background",
-        *data.get("secondary_colors", []),
-        *data.get("shapes", []),
-        *data.get("style", []),
-        *data.get("mood", []),
-        *data.get("best_use", []),
-        "modern",
-        "digital",
-        "design",
-        "wallpaper",
-        "technology",
-        "creative",
-        "art",
-        "template",
-        "backdrop"
-    ]
-
-    # clean & limit 50
-    keywords = list(dict.fromkeys([k for k in keywords if k]))[:50]
-
-    return title, description, keywords
+    return eval(response.choices[0].message.content)
 
 # ===============================
 # UI
 # ===============================
-st.title("🚀 Microstock Metadata Generator (Adobe Stock)")
-st.caption("Upload image → AI generates title, description & 50 keywords")
+st.title("🚀 Microstock Metadata Generator (STABLE)")
+st.caption("Color detection lokal + AI metadata (NO vision error)")
 
-uploaded_files = st.file_uploader(
+files = st.file_uploader(
     "Upload image(s)",
     type=["png", "jpg", "jpeg"],
     accept_multiple_files=True
@@ -144,49 +96,188 @@ uploaded_files = st.file_uploader(
 
 results = []
 
-if uploaded_files:
-    for file in uploaded_files:
+if files:
+    for f in files:
         st.divider()
-        img = Image.open(file).convert("RGB")
+        img = Image.open(f).convert("RGB")
         st.image(img, width=300)
 
-        with st.spinner("Analyzing image with AI..."):
-            analysis = analyze_image_ai(img)
+        color = detect_main_color(img)
+        st.write("🎨 Detected color:", color)
 
-            if not analysis:
-                continue
+        with st.spinner("Generating metadata..."):
+            data = generate_metadata_ai(color)
 
-            title, desc, keywords = generate_metadata(analysis)
+        st.subheader("Title")
+        st.write(data["title"])
 
-            st.subheader("Title")
-            st.write(title)
+        st.subheader("Description")
+        st.write(data["description"])
 
-            st.subheader("Description")
-            st.write(desc)
+        st.subheader("Keywords")
+        st.write(", ".join(data["keywords"]))
 
-            st.subheader("Keywords (50)")
-            st.write(", ".join(keywords))
-
-            results.append({
-                "Filename": file.name,
-                "Title": title,
-                "Description": desc,
-                "Keywords": ", ".join(keywords)
-            })
+        results.append({
+            "Filename": f.name,
+            "Title": data["title"],
+            "Description": data["description"],
+            "Keywords": ", ".join(data["keywords"])
+        })
 
 # ===============================
 # CSV EXPORT
 # ===============================
 if results:
-    st.divider()
-    st.subheader("📦 Adobe Stock CSV Export")
-
     df = pd.DataFrame(results)
+    st.divider()
+    st.subheader("📦 Adobe Stock CSV")
     st.dataframe(df, use_container_width=True)
 
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "⬇️ Download CSV (Adobe Stock)",
+        "⬇️ Download CSV",
+        csv,
+        "adobe_stock_metadata.csv",
+        "text/csv"
+    )
+import streamlit as st
+import openai
+import pandas as pd
+from PIL import Image
+import numpy as np
+from collections import Counter
+
+# ===============================
+# CONFIG
+# ===============================
+st.set_page_config(page_title="Microstock Metadata Generator", layout="wide")
+
+if "OPENAI_API_KEY" not in st.secrets:
+    st.error("❌ OPENAI_API_KEY belum diset")
+    st.stop()
+
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+# ===============================
+# COLOR DETECTION (LOCAL & AKURAT)
+# ===============================
+COLOR_MAP = {
+    "blue": [(0, 0, 255), (70, 130, 180)],
+    "purple": [(128, 0, 128)],
+    "green": [(0, 128, 0)],
+    "red": [(220, 20, 60)],
+    "orange": [(255, 165, 0)],
+    "yellow": [(255, 215, 0)],
+    "black": [(0, 0, 0)],
+    "white": [(255, 255, 255)],
+    "gray": [(128, 128, 128)],
+    "pink": [(255, 105, 180)],
+    "teal": [(0, 128, 128)],
+    "cyan": [(0, 255, 255)],
+}
+
+def closest_color(rgb):
+    r, g, b = rgb
+    min_dist = 1e9
+    name = "abstract"
+    for color, samples in COLOR_MAP.items():
+        for s in samples:
+            dist = (r-s[0])**2 + (g-s[1])**2 + (b-s[2])**2
+            if dist < min_dist:
+                min_dist = dist
+                name = color
+    return name
+
+def detect_main_color(img):
+    img = img.resize((100, 100))
+    pixels = np.array(img).reshape(-1, 3)
+    colors = [closest_color(tuple(p)) for p in pixels]
+    return Counter(colors).most_common(1)[0][0]
+
+# ===============================
+# AI TEXT GENERATOR (STABLE)
+# ===============================
+def generate_metadata_ai(color):
+    prompt = f"""
+Create Adobe Stock metadata.
+
+Main color: {color}
+
+Return JSON only:
+{{
+ "title": "",
+ "description": "",
+ "keywords": []
+}}
+
+Rules:
+- Keywords max 50
+- No brand names
+- SEO friendly
+"""
+
+    response = openai.ChatCompletion.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=300
+    )
+
+    return eval(response.choices[0].message.content)
+
+# ===============================
+# UI
+# ===============================
+st.title("🚀 Microstock Metadata Generator (STABLE)")
+st.caption("Color detection lokal + AI metadata (NO vision error)")
+
+files = st.file_uploader(
+    "Upload image(s)",
+    type=["png", "jpg", "jpeg"],
+    accept_multiple_files=True
+)
+
+results = []
+
+if files:
+    for f in files:
+        st.divider()
+        img = Image.open(f).convert("RGB")
+        st.image(img, width=300)
+
+        color = detect_main_color(img)
+        st.write("🎨 Detected color:", color)
+
+        with st.spinner("Generating metadata..."):
+            data = generate_metadata_ai(color)
+
+        st.subheader("Title")
+        st.write(data["title"])
+
+        st.subheader("Description")
+        st.write(data["description"])
+
+        st.subheader("Keywords")
+        st.write(", ".join(data["keywords"]))
+
+        results.append({
+            "Filename": f.name,
+            "Title": data["title"],
+            "Description": data["description"],
+            "Keywords": ", ".join(data["keywords"])
+        })
+
+# ===============================
+# CSV EXPORT
+# ===============================
+if results:
+    df = pd.DataFrame(results)
+    st.divider()
+    st.subheader("📦 Adobe Stock CSV")
+    st.dataframe(df, use_container_width=True)
+
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "⬇️ Download CSV",
         csv,
         "adobe_stock_metadata.csv",
         "text/csv"
