@@ -1,3 +1,4 @@
 streamlit
 pillow
-colorthief
+pandas
+openai
